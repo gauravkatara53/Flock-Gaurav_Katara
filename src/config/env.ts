@@ -1,7 +1,6 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-// Load environment variables from .env file
 dotenv.config();
 
 const envSchema = z.object({
@@ -25,6 +24,21 @@ const envSchema = z.object({
     .transform((val) => parseInt(val, 10))
     .pipe(z.number().int().positive()),
   PORTAL_SESSION_TOKEN: z.string().default(''),
+  CACHE_TTL_MS: z
+    .string()
+    .default('60000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
+  CACHE_MAX_ENTRIES: z
+    .string()
+    .default('1000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
+  REQUEST_TIMEOUT_MS: z
+    .string()
+    .default('15000')
+    .transform((val) => parseInt(val, 10))
+    .pipe(z.number().int().positive()),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
@@ -47,7 +61,7 @@ export function validateEnv(rawEnv: Record<string, string | undefined> = process
 }
 
 /**
- * Returns a sanitized copy of configuration safe for logging (secrets redacted).
+ * Returns a copy of configuration with sensitive values redacted for logging.
  */
 export function getSanitizedConfig(config: EnvConfig): Record<string, unknown> {
   return {
@@ -58,8 +72,10 @@ export function getSanitizedConfig(config: EnvConfig): Record<string, unknown> {
     PORTAL_PASSWORD: config.PORTAL_PASSWORD ? '******' : '(empty)',
     PORTAL_TIMEOUT_MS: config.PORTAL_TIMEOUT_MS,
     PORTAL_SESSION_TOKEN: config.PORTAL_SESSION_TOKEN ? '******' : '(empty)',
+    CACHE_TTL_MS: config.CACHE_TTL_MS,
+    CACHE_MAX_ENTRIES: config.CACHE_MAX_ENTRIES,
+    REQUEST_TIMEOUT_MS: config.REQUEST_TIMEOUT_MS,
   };
 }
 
-// Active singleton configuration instance
 export const env: EnvConfig = validateEnv(process.env);

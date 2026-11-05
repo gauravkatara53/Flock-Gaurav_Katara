@@ -1,6 +1,3 @@
-/**
- * Standard error codes supported across the service.
- */
 export type ErrorCode =
   | 'PORTAL_AUTH_FAILED'
   | 'PORTAL_SESSION_EXPIRED'
@@ -8,11 +5,10 @@ export type ErrorCode =
   | 'PORTAL_UNAVAILABLE'
   | 'INVALID_CONFIGURATION'
   | 'INTERNAL_SERVER_ERROR'
-  | 'ROUTE_NOT_FOUND';
+  | 'ROUTE_NOT_FOUND'
+  | 'VALIDATION_ERROR'
+  | 'NOT_FOUND';
 
-/**
- * Standard API Error interface.
- */
 export interface ApiErrorResponse {
   success: false;
   error: {
@@ -22,41 +18,31 @@ export interface ApiErrorResponse {
   };
 }
 
-/**
- * Health endpoint response structure.
- */
 export interface HealthResponse {
   success: true;
   service: 'urja-meter-api';
   status: 'healthy';
 }
 
-/**
- * Portal status response structure.
- */
 export interface PortalStatusResponse {
   success: true;
   portal: 'Urja Meter Ops';
+  sessionConfigured: boolean;
   authenticated: boolean;
+  portalReachable: boolean;
 }
 
-/**
- * Session verification result.
- */
 export interface SessionValidationResult {
   authenticated: boolean;
+  sessionConfigured: boolean;
+  portalReachable: boolean;
   reason?: string;
 }
 
-/**
- * Better Auth session cookie names observed in the portal.
- */
 export const BETTER_AUTH_COOKIE_NAME = '__Secure-better-auth.session_token';
 export const BETTER_AUTH_DEV_COOKIE_NAME = 'better-auth.session_token';
 
-/**
- * Verified portal endpoints from project investigation findings.
- */
+// Upstream Urja Ops portal endpoints
 export const PORTAL_ENDPOINTS = {
   METERS_SEARCH: '/portal/meters/search',
   METER_GEO: (meterId: string) => `/portal/meters/${meterId}/geo`,
@@ -67,8 +53,18 @@ export const PORTAL_ENDPOINTS = {
 } as const;
 
 /**
- * Custom application error class.
+ * Adapter interface for authentication strategies.
  */
+export interface ILoginAdapter {
+  readonly name: string;
+  login(
+    credentials: { username?: string; password?: string },
+    client: unknown
+  ): Promise<string | void>;
+  isConfigured(): boolean;
+  getMissingDetails(): string;
+}
+
 export class AppError extends Error {
   public readonly code: ErrorCode;
   public readonly statusCode: number;

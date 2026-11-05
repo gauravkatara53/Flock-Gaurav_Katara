@@ -3,17 +3,13 @@ import { isAxiosError } from 'axios';
 import { AppError, ApiErrorResponse, ErrorCode } from '../types/portal.types';
 import { logger } from '../utils/logger';
 
-/**
- * 404 Not Found Middleware.
- */
 export function notFoundHandler(req: Request, res: Response, next: NextFunction): void {
   const error = new AppError('ROUTE_NOT_FOUND', `Route not found: ${req.method} ${req.originalUrl}`, 404);
   next(error);
 }
 
 /**
- * Centralized Error Handling Middleware.
- * Standardizes all error responses and ensures no stack traces or secrets leak in production.
+ * Centralized error handler. Formats errors into standardized API responses.
  */
 export function errorHandler(
   err: Error | AppError,
@@ -57,6 +53,10 @@ export function errorHandler(
       statusCode = err.response?.status || 500;
       message = err.message || 'Error communicating with Urja Meter Ops portal';
     }
+  } else if (err.message && err.message.includes('VALIDATION_ERROR')) {
+    statusCode = 400;
+    errorCode = 'VALIDATION_ERROR';
+    message = err.message;
   } else if (err.message && err.message.startsWith('[INVALID_CONFIGURATION]')) {
     statusCode = 500;
     errorCode = 'INVALID_CONFIGURATION';
@@ -65,7 +65,6 @@ export function errorHandler(
     message = process.env.NODE_ENV === 'production' ? 'An unexpected internal error occurred' : err.message;
   }
 
-  // Log error (safely sanitized)
   logger.error(`${errorCode} on ${req.method} ${req.originalUrl}: ${message}`, {
     statusCode,
     errorCode,

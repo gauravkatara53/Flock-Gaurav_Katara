@@ -24,7 +24,7 @@ export class PortalClient {
   constructor(options: PortalClientOptions = {}) {
     this.baseURL = options.baseURL || env.PORTAL_BASE_URL;
     const timeout = options.timeoutMs ?? env.PORTAL_TIMEOUT_MS;
-    this.jar = options.cookieJar || new CookieJar();
+    this.jar = options.cookieJar || new CookieJar(undefined, { allowSpecialUseDomain: true, rejectPublicSuffixes: false });
 
     const instance = axios.create({
       baseURL: this.baseURL,
@@ -34,22 +34,17 @@ export class PortalClient {
         Accept: 'application/json, text/plain, */*',
         'Content-Type': 'application/json',
       },
-      // Do not automatically follow redirects to avoid masking 302 login redirects
+      // Avoid following redirects so 302 login responses are not masked
       maxRedirects: 5,
       validateStatus: (status) => status >= 200 && status < 300,
     });
 
-    // Enable tough-cookie support in Axios
     this.client = wrapper(instance);
-
     this.setupInterceptors();
   }
 
-  /**
-   * Sets up request and response interceptors for logging and error mapping.
-   */
   private setupInterceptors(): void {
-    // Request Interceptor: Logs outgoing requests (without sensitive headers)
+    // Strip sensitive headers before logging
     this.client.interceptors.request.use(
       (config) => {
         const safeHeaders: Record<string, unknown> = { ...config.headers };
@@ -71,12 +66,27 @@ export class PortalClient {
       }
     );
 
-    // Response Interceptor: Logs successful responses and maps errors
     this.client.interceptors.response.use(
       (response) => {
         logger.debug(
           `[PortalClient Response] ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`
         );
+
+        // If an API endpoint unexpectedly returns HTML (e.g. SvelteKit redirecting unauthenticated calls to login page)
+        if (
+          typeof response.data === 'string' &&
+          (response.data.includes('<!DOCTYPE html>') || response.data.includes('<html')) &&
+          response.config.url &&
+          !response.config.url.endsWith('/') &&
+          !response.config.url.endsWith('/portal')
+        ) {
+          throw new AppError(
+            'PORTAL_AUTH_FAILED',
+            `Urja Meter Ops portal returned HTML instead of JSON for ${response.config.url} (session missing or unauthenticated redirect)`,
+            401
+          );
+        }
+
         return response;
       },
       (error) => {
@@ -85,9 +95,6 @@ export class PortalClient {
     );
   }
 
-  /**
-   * Normalizes network, timeout, and HTTP status errors into standardized AppErrors.
-   */
   public normalizeError(error: unknown): AppError | Error {
     if (error instanceof AppError) {
       return error;
@@ -163,36 +170,24 @@ export class PortalClient {
     return this.client;
   }
 
-  /**
-   * Sets a cookie in the shared cookie jar.
-   */
   public async setCookie(cookieString: string, currentUrl: string = this.baseURL): Promise<void> {
     await this.jar.setCookie(cookieString, currentUrl);
   }
 
-  /**
-   * Retrieves all cookies for a given URL.
-   */
   public async getCookies(currentUrl: string = this.baseURL): Promise<Cookie[]> {
     return this.jar.getCookies(currentUrl);
   }
 
-  /**
-   * Retrieves a specific cookie value by name.
-   */
   public async getCookieValue(cookieName: string, currentUrl: string = this.baseURL): Promise<string | undefined> {
     const cookies = await this.getCookies(currentUrl);
     const found = cookies.find((c) => c.key === cookieName);
     return found?.value;
   }
 
-  /**
-   * Clears all stored cookies.
-   */
   public async clearCookies(): Promise<void> {
     await this.jar.removeAllCookies();
   }
 }
 
-// Export singleton instance for default application use
 export const portalClient = new PortalClient();
+

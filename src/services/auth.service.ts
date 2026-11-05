@@ -5,6 +5,7 @@ import {
   AppError,
   BETTER_AUTH_COOKIE_NAME,
   BETTER_AUTH_DEV_COOKIE_NAME,
+  ILoginAdapter,
   PORTAL_ENDPOINTS,
   SessionValidationResult,
 } from '../types/portal.types';
@@ -14,39 +15,62 @@ export interface IAuthService {
   validateSession(forceCheck?: boolean): Promise<SessionValidationResult>;
   setSessionToken(token: string): Promise<void>;
   getSessionToken(): Promise<string | null>;
+  hasSessionCookie(): Promise<boolean>;
   ensureAuthenticated(): Promise<void>;
   login(username?: string, password?: string): Promise<SessionValidationResult>;
+  reauthenticate(): Promise<SessionValidationResult>;
+  clearInvalidSession(): Promise<void>;
   logout(): Promise<void>;
+  setLoginAdapter(adapter: ILoginAdapter): void;
 }
 
-/**
- * Authentication Service for Urja Meter Ops portal.
- *
- * Architecture Note:
- * The portal uses SvelteKit with Better Auth session cookies (`__Secure-better-auth.session_token`).
- * As per the provided Phase 1 investigation findings, the internal credential login POST endpoint
- * and payload schema were not verified. In accordance with project instructions ("Do not invent a
- * login endpoint or request payload. If a specific login detail is unavailable, implement the remaining
- * architecture and isolate authentication behind a clearly documented interface"), this service:
- * 1. Manages Better Auth session cookies in the shared cookie jar.
- * 2. Pre-loads session tokens from configuration if provided (`PORTAL_SESSION_TOKEN`).
- * 3. Validates active sessions against verified portal endpoints (`/portal/meters/search?q=&page=1`).
- * 4. Caches session status to avoid redundant portal requests.
- * 5. Provides a clear pluggable contract (`login`) ready for Phase 2 when endpoint payload is provided.
- */
+class DefaultLoginAdapter implements ILoginAdapter {
+  readonly name = 'DefaultBetterAuthAdapter';
+
+  async login(
+    credentials: { username?: string; password?: string },
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _client: unknown
+  ): Promise<string | void> {
+    if (!credentials.username || !credentials.password) {
+      throw new AppError(
+        'PORTAL_AUTH_FAILED',
+        'Authentication credentials missing. Provide username and password.',
+        400
+      );
+    }
+
+    throw new AppError('PORTAL_AUTH_FAILED', this.getMissingDetails(), 501);
+  }
+
+  isConfigured(): boolean {
+    return false;
+  }
+
+  getMissingDetails(): string {
+    return 'Portal username/password login endpoint (e.g. Better Auth /api/auth/sign-in/email vs form POST) and request payload schema were not verified during discovery. Please supply PORTAL_SESSION_TOKEN or configure a verified ILoginAdapter.';
+  }
+}
+
 export class AuthService implements IAuthService {
   private readonly client: PortalClient;
   private cachedSessionStatus: { authenticated: boolean; timestamp: number } | null = null;
-  private readonly cacheTtlMs: number = 30_000; // 30 seconds cache for session validation
+  private readonly cacheTtlMs: number = 30_000;
+  private inFlightValidationPromise: Promise<SessionValidationResult> | null = null;
+  private isReauthenticating: boolean = false;
+  private sessionExplicitlyInvalidated: boolean = false;
+  private loginAdapter: ILoginAdapter = new DefaultLoginAdapter();
 
   constructor(client: PortalClient = portalClient) {
     this.client = client;
     this.initializeFromEnv();
   }
 
-  /**
-   * Initializes session token from environment configuration if present.
-   */
+  public setLoginAdapter(adapter: ILoginAdapter): void {
+    this.loginAdapter = adapter;
+    logger.info(`Login adapter updated to: ${adapter.name}`);
+  }
+
   private initializeFromEnv(): void {
     if (env.PORTAL_SESSION_TOKEN) {
       this.setSessionToken(env.PORTAL_SESSION_TOKEN).catch((err) => {
@@ -55,9 +79,6 @@ export class AuthService implements IAuthService {
     }
   }
 
-  /**
-   * Sets the Better Auth session token cookie in the client cookie jar.
-   */
   public async setSessionToken(token: string): Promise<void> {
     if (!token || !token.trim()) {
       throw new AppError('PORTAL_AUTH_FAILED', 'Session token cannot be empty', 400);
@@ -65,21 +86,25 @@ export class AuthService implements IAuthService {
 
     const trimmed = token.trim();
     const isHttps = this.client.getBaseURL().startsWith('https://');
-    const cookieName = isHttps ? BETTER_AUTH_COOKIE_NAME : BETTER_AUTH_DEV_COOKIE_NAME;
-    const cookieDomain = new URL(this.client.getBaseURL()).hostname;
+    const hostname = new URL(this.client.getBaseURL()).hostname;
+    const isIpOrLocalhost =
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      /^(\d+\.){3}\d+$/.test(hostname);
+    const domainAttr = isIpOrLocalhost ? '' : `; Domain=${hostname}`;
 
-    // Build standard cookie string
-    const cookieString = `${cookieName}=${trimmed}; Path=/; Domain=${cookieDomain}; HttpOnly${isHttps ? '; Secure' : ''}`;
-    await this.client.setCookie(cookieString, this.client.getBaseURL());
+    // Set both __Secure-prefixed and standard Better Auth cookie names to support TLS offloading/reverse proxies
+    const secureCookie = `${BETTER_AUTH_COOKIE_NAME}=${trimmed}; Path=/${domainAttr}; HttpOnly${isHttps ? '; Secure' : ''}`;
+    const devCookie = `${BETTER_AUTH_DEV_COOKIE_NAME}=${trimmed}; Path=/${domainAttr}; HttpOnly${isHttps ? '; Secure' : ''}`;
 
-    // Reset session cache on token update
+    await this.client.setCookie(secureCookie, this.client.getBaseURL());
+    await this.client.setCookie(devCookie, this.client.getBaseURL());
+
     this.cachedSessionStatus = null;
+    this.sessionExplicitlyInvalidated = false;
     logger.info('Portal session cookie updated in cookie jar');
   }
 
-  /**
-   * Retrieves the current session token from the cookie jar.
-   */
   public async getSessionToken(): Promise<string | null> {
     const secureToken = await this.client.getCookieValue(BETTER_AUTH_COOKIE_NAME);
     if (secureToken) return secureToken;
@@ -88,58 +113,93 @@ export class AuthService implements IAuthService {
     return devToken || null;
   }
 
-  /**
-   * Checks whether the client currently holds an active session token.
-   */
   public async hasSessionCookie(): Promise<boolean> {
     const token = await this.getSessionToken();
     return Boolean(token && token.length > 0);
   }
 
   /**
-   * Validates the active portal session by testing connectivity against a verified portal endpoint.
-   * Leverages caching to avoid repeated roundtrips.
+   * Validates portal session connectivity. Reuses cached status within cacheTtlMs
+   * and deduplicates concurrent in-flight requests.
    */
   public async validateSession(forceCheck: boolean = false): Promise<SessionValidationResult> {
     const now = Date.now();
 
-    // Check cache if not forcing check
     if (!forceCheck && this.cachedSessionStatus && now - this.cachedSessionStatus.timestamp < this.cacheTtlMs) {
-      return { authenticated: this.cachedSessionStatus.authenticated };
+      const hasCookie = await this.hasSessionCookie();
+      return {
+        authenticated: this.cachedSessionStatus.authenticated,
+        sessionConfigured: hasCookie,
+        portalReachable: true,
+      };
     }
 
-    // Check if session cookie exists
+    if (this.inFlightValidationPromise) {
+      return this.inFlightValidationPromise;
+    }
+
+    this.inFlightValidationPromise = this.performValidation(now);
+
+    try {
+      return await this.inFlightValidationPromise;
+    } finally {
+      this.inFlightValidationPromise = null;
+    }
+  }
+
+  private async performValidation(now: number): Promise<SessionValidationResult> {
     const hasCookie = await this.hasSessionCookie();
+
     if (!hasCookie) {
       this.cachedSessionStatus = { authenticated: false, timestamp: now };
       return {
         authenticated: false,
+        sessionConfigured: false,
+        portalReachable: true,
         reason: 'No Better Auth session token present in cookie jar',
       };
     }
 
     try {
-      // Validate session against verified portal search endpoint
       const response = await this.client.get(`${PORTAL_ENDPOINTS.METERS_SEARCH}?q=&page=1`);
 
       if (response.status === 200) {
         this.cachedSessionStatus = { authenticated: true, timestamp: now };
-        return { authenticated: true };
+        return {
+          authenticated: true,
+          sessionConfigured: true,
+          portalReachable: true,
+        };
       }
 
-      this.cachedSessionStatus = { authenticated: false, timestamp: now };
+      await this.clearInvalidSession();
       return {
         authenticated: false,
-        reason: `Portal responded with unexpected status ${response.status}`,
+        sessionConfigured: false,
+        portalReachable: true,
+        reason: `Portal returned unexpected status ${response.status}`,
       };
     } catch (error) {
-      this.cachedSessionStatus = { authenticated: false, timestamp: now };
-
       if (error instanceof AppError) {
         if (error.code === 'PORTAL_AUTH_FAILED' || error.code === 'PORTAL_SESSION_EXPIRED') {
-          return { authenticated: false, reason: error.message };
+          await this.clearInvalidSession();
+          return {
+            authenticated: false,
+            sessionConfigured: false,
+            portalReachable: true,
+            reason: error.message,
+          };
         }
-        // Network or timeout errors bubble up
+
+        if (error.code === 'PORTAL_UNAVAILABLE' || error.code === 'PORTAL_TIMEOUT') {
+          return {
+            authenticated: false,
+            sessionConfigured: hasCookie,
+            portalReachable: false,
+            reason: error.message,
+          };
+        }
+
         throw error;
       }
 
@@ -147,9 +207,6 @@ export class AuthService implements IAuthService {
     }
   }
 
-  /**
-   * Quick boolean check of authentication status.
-   */
   public async isAuthenticated(): Promise<boolean> {
     try {
       const result = await this.validateSession();
@@ -160,56 +217,87 @@ export class AuthService implements IAuthService {
   }
 
   /**
-   * Ensures that the client is authenticated, throwing AppError if not.
+   * Attempts a single re-authentication cycle. Guard flag prevents infinite loops.
    */
-  public async ensureAuthenticated(): Promise<void> {
-    const result = await this.validateSession();
-    if (!result.authenticated) {
+  public async reauthenticate(): Promise<SessionValidationResult> {
+    if (this.isReauthenticating) {
       throw new AppError(
         'PORTAL_SESSION_EXPIRED',
-        result.reason || 'Urja Meter Ops portal session is invalid or expired',
+        'Re-authentication already in progress. Aborting to avoid infinite loop.',
         401
       );
     }
+
+    this.isReauthenticating = true;
+    try {
+      logger.warn('Attempting single re-authentication cycle...');
+      await this.clearInvalidSession();
+
+      if (this.loginAdapter.isConfigured()) {
+        const res = await this.login(env.PORTAL_USERNAME, env.PORTAL_PASSWORD);
+        if (res.authenticated) {
+          logger.info('Re-authentication succeeded');
+          return res;
+        }
+      }
+
+      return {
+        authenticated: false,
+        sessionConfigured: false,
+        portalReachable: true,
+        reason: 'Session expired and automatic re-authentication could not be completed',
+      };
+    } finally {
+      this.isReauthenticating = false;
+    }
   }
 
-  /**
-   * Login implementation interface.
-   *
-   * As specified in the Phase 1 instructions, the login endpoint and request schema
-   * were not verified during initial investigation and must not be guessed.
-   * This interface isolates authentication so that once the login contract is finalized,
-   * it can be implemented without refactoring other layers.
-   */
-  public async login(username?: string, password?: string): Promise<SessionValidationResult> {
-    const effectiveUsername = username || env.PORTAL_USERNAME;
-    const effectivePassword = password || env.PORTAL_PASSWORD;
-
-    if (!effectiveUsername || !effectivePassword) {
-      throw new AppError(
-        'PORTAL_AUTH_FAILED',
-        'Authentication credentials missing. Provide username and password.',
-        400
-      );
+  public async ensureAuthenticated(): Promise<void> {
+    const result = await this.validateSession();
+    if (result.authenticated) {
+      return;
     }
 
-    // Since the login endpoint payload is intentionally not guessed per Phase 1 instructions:
+    if (this.loginAdapter.isConfigured() && !this.isReauthenticating) {
+      const reauthResult = await this.reauthenticate();
+      if (reauthResult.authenticated) {
+        return;
+      }
+    }
+
     throw new AppError(
-      'PORTAL_AUTH_FAILED',
-      'Direct credentials login endpoint is not verified in Phase 1 discovery findings. Use PORTAL_SESSION_TOKEN or verify the Better Auth sign-in route.',
-      501
+      'PORTAL_SESSION_EXPIRED',
+      result.reason || 'Urja Meter Ops portal session is invalid or expired',
+      401
     );
   }
 
-  /**
-   * Clears the active session and cookies.
-   */
-  public async logout(): Promise<void> {
+  public async login(username?: string, password?: string): Promise<SessionValidationResult> {
+    const effectiveUsername = username !== undefined ? username : env.PORTAL_USERNAME;
+    const effectivePassword = password !== undefined ? password : env.PORTAL_PASSWORD;
+
+    const token = await this.loginAdapter.login(
+      { username: effectiveUsername, password: effectivePassword },
+      this.client
+    );
+
+    if (token) {
+      await this.setSessionToken(token);
+    }
+
+    return this.validateSession(true);
+  }
+
+  public async clearInvalidSession(): Promise<void> {
     await this.client.clearCookies();
     this.cachedSessionStatus = null;
-    logger.info('Portal session cleared');
+    logger.info('Invalidated session state and cleared cookies');
+  }
+
+  public async logout(): Promise<void> {
+    await this.clearInvalidSession();
+    logger.info('Portal session logged out');
   }
 }
 
-// Export singleton instance
 export const authService = new AuthService(portalClient);
