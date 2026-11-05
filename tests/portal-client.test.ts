@@ -168,3 +168,4 @@ describe('Portal HTTP Client', () => {
     });
   });
 });
+
