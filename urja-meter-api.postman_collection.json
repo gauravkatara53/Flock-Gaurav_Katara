@@ -1,0 +1,567 @@
+{
+  "info": {
+    "_postman_id": "7f8b9e6a-1234-4567-89ab-cdef01234567",
+    "name": "Urja Meter Ops API",
+    "description": "Postman collection covering all endpoints for the Urja Meter Ops API service, including Health, Live Portal APIs, Bulk Export, In-Memory Local Indexing, and Network Hierarchy navigation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "sampleMeterId",
+      "value": "M001",
+      "type": "string"
+    },
+    {
+      "key": "sampleTransformerId",
+      "value": "DT001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Portal Status",
+      "description": "Endpoints to verify service uptime and upstream portal session connectivity.",
+      "item": [
+        {
+          "name": "Service Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "health"]
+            },
+            "description": "Returns current service health and uptime status without contacting upstream portal."
+          }
+        },
+        {
+          "name": "Portal Session Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/portal/status?force=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "portal", "status"],
+              "query": [
+                {
+                  "key": "force",
+                  "value": "false",
+                  "description": "Set to 'true' to bypass 30-second session cache and force fresh validation check against upstream portal"
+                }
+              ]
+            },
+            "description": "Checks whether the Better Auth session token is configured and valid against upstream portal."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Live Portal APIs",
+      "description": "Live query endpoints that proxy directly to the upstream Urja Ops Portal with response normalization and caching.",
+      "item": [
+        {
+          "name": "Search Meters (Live)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters?q=rajesh&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "rajesh",
+                  "description": "Search keyword for meter number, consumer name, etc."
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (1-indexed)"
+                }
+              ]
+            },
+            "description": "Searches meters on the upstream portal with pagination."
+          }
+        },
+        {
+          "name": "Get Meter Location (Live)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters/:meterId/location",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters", ":meterId", "location"],
+              "variable": [
+                {
+                  "key": "meterId",
+                  "value": "{{sampleMeterId}}",
+                  "description": "Target meter ID"
+                }
+              ]
+            },
+            "description": "Fetches normalized latitude, longitude coordinates and address for a specific meter."
+          }
+        },
+        {
+          "name": "Get Meter Consumption (Live)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters/:meterId/consumption",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters", ":meterId", "consumption"],
+              "variable": [
+                {
+                  "key": "meterId",
+                  "value": "{{sampleMeterId}}",
+                  "description": "Target meter ID"
+                }
+              ]
+            },
+            "description": "Fetches normalized interval energy/consumption readings for a specific meter with original timestamps preserved."
+          }
+        },
+        {
+          "name": "List Transformers (Live)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transformers?page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "transformers"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (1-indexed)"
+                }
+              ]
+            },
+            "description": "Retrieves paginated distribution transformers (DTs) from the portal."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Bulk Export & Ingestion",
+      "description": "Endpoints to trigger bulk export data synchronization into the local in-memory index and monitor sync status.",
+      "item": [
+        {
+          "name": "Trigger Bulk Export Import",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters/export?page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters", "export"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Starting page for bulk export import (default: 1)"
+                }
+              ]
+            },
+            "description": "Triggers bulk data synchronization from the upstream portal into the local in-memory index. Simultaneous requests are automatically deduplicated."
+          }
+        },
+        {
+          "name": "Get Export & Index Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters/export/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters", "export", "status"]
+            },
+            "description": "Returns current sync status, total records indexed, and timestamp of the last successful refresh."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Local In-Memory Meter Index",
+      "description": "Ultra-fast indexed search and retrieval against the local in-memory meter store.",
+      "item": [
+        {
+          "name": "Search Local Meters (Multi-tier Filtering)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters/local?q=&page=1&limit=20&zone=&circle=&division=&subdivision=&substation=&feeder=&transformer=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters", "local"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "Search keyword across meter number, consumer name, etc."
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (1-indexed)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Number of records per page (max: 1000)"
+                },
+                {
+                  "key": "zone",
+                  "value": "",
+                  "description": "Filter by Zone (e.g. 'North Zone')"
+                },
+                {
+                  "key": "circle",
+                  "value": "",
+                  "description": "Filter by Circle (e.g. 'Delhi Circle')"
+                },
+                {
+                  "key": "division",
+                  "value": "",
+                  "description": "Filter by Division (e.g. 'Central Division')"
+                },
+                {
+                  "key": "subdivision",
+                  "value": "",
+                  "description": "Filter by Subdivision"
+                },
+                {
+                  "key": "substation",
+                  "value": "",
+                  "description": "Filter by Substation"
+                },
+                {
+                  "key": "feeder",
+                  "value": "",
+                  "description": "Filter by Feeder"
+                },
+                {
+                  "key": "transformer",
+                  "value": "",
+                  "description": "Filter by Transformer Name or ID"
+                }
+              ]
+            },
+            "description": "Searches the locally indexed dataset using inverted tier indices and pre-computed token matching."
+          }
+        },
+        {
+          "name": "Get Local Meter By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meters/local/:meterId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meters", "local", ":meterId"],
+              "variable": [
+                {
+                  "key": "meterId",
+                  "value": "{{sampleMeterId}}",
+                  "description": "Meter ID or Meter Number"
+                }
+              ]
+            },
+            "description": "Retrieves a single locally indexed meter by ID or meter number in O(1) time."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Network Hierarchy",
+      "description": "Endpoints to navigate and query the 8-tier utility distribution hierarchy: Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> Transformer -> Meter.",
+      "item": [
+        {
+          "name": "Hierarchy Summary Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/hierarchy",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "hierarchy"]
+            },
+            "description": "Returns statistical counts of unique entities across all 8 tiers of the network."
+          }
+        },
+        {
+          "name": "Hierarchy Tree Generator",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/hierarchy/tree?depth=transformer",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "hierarchy", "tree"],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "transformer",
+                  "description": "Cutoff depth for the tree: 'zone', 'circle', 'division', 'subdivision', 'substation', 'feeder', 'transformer', or 'meter'"
+                }
+              ]
+            },
+            "description": "Generates a nested tree structure representing the distribution hierarchy down to the specified depth level."
+          }
+        },
+        {
+          "name": "Hierarchy Children Navigation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/hierarchy/children?level=circle&zone=North%20Zone",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "hierarchy", "children"],
+              "query": [
+                {
+                  "key": "level",
+                  "value": "circle",
+                  "description": "Target child level to navigate ('circle', 'division', 'subdivision', 'substation', 'feeder', 'transformer')"
+                },
+                {
+                  "key": "zone",
+                  "value": "North Zone",
+                  "description": "Optional parent Zone constraint"
+                },
+                {
+                  "key": "circle",
+                  "value": "",
+                  "description": "Optional parent Circle constraint"
+                },
+                {
+                  "key": "division",
+                  "value": "",
+                  "description": "Optional parent Division constraint"
+                },
+                {
+                  "key": "subdivision",
+                  "value": "",
+                  "description": "Optional parent Subdivision constraint"
+                },
+                {
+                  "key": "substation",
+                  "value": "",
+                  "description": "Optional parent Substation constraint"
+                },
+                {
+                  "key": "feeder",
+                  "value": "",
+                  "description": "Optional parent Feeder constraint"
+                }
+              ]
+            },
+            "description": "Lists child nodes for a given hierarchy tier under optional parent scope filters."
+          }
+        },
+        {
+          "name": "Filter Meters by Hierarchy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/hierarchy/meters?zone=North%20Zone&circle=&division=&subdivision=&substation=&feeder=&transformer=&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "hierarchy", "meters"],
+              "query": [
+                {
+                  "key": "zone",
+                  "value": "North Zone"
+                },
+                {
+                  "key": "circle",
+                  "value": ""
+                },
+                {
+                  "key": "division",
+                  "value": ""
+                },
+                {
+                  "key": "subdivision",
+                  "value": ""
+                },
+                {
+                  "key": "substation",
+                  "value": ""
+                },
+                {
+                  "key": "feeder",
+                  "value": ""
+                },
+                {
+                  "key": "transformer",
+                  "value": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Retrieves meters filtered strictly by any combination of hierarchy levels."
+          }
+        },
+        {
+          "name": "Get Meters under Transformer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/transformers/:transformerId/meters?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "transformers", ":transformerId", "meters"],
+              "variable": [
+                {
+                  "key": "transformerId",
+                  "value": "{{sampleTransformerId}}",
+                  "description": "Target transformer ID or transformer name"
+                }
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Retrieves all meters associated with a particular transformer."
+          }
+        },
+        {
+          "name": "Get Meters under Transformer (Hierarchy Alias)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/hierarchy/transformers/:transformerId/meters?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "hierarchy", "transformers", ":transformerId", "meters"],
+              "variable": [
+                {
+                  "key": "transformerId",
+                  "value": "{{sampleTransformerId}}",
+                  "description": "Target transformer ID or transformer name"
+                }
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Hierarchy route alias to retrieve all meters under a specific transformer."
+          }
+        }
+      ]
+    }
+  ]
+}

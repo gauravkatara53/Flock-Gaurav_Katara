@@ -1,0 +1,1077 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Urja Meter Ops API Service",
+    "description": "Clean, maintainable, production-ready REST API service over the Urja Meter Ops SvelteKit application.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local Development Server"
+    }
+  ],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "summary": "Service Health Check",
+        "description": "Returns operational health of the REST API. Operates independently of portal connectivity or authentication.",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/portal/status": {
+      "get": {
+        "summary": "Portal Session Status",
+        "description": "Inspects whether the active service session is authenticated with the Urja Meter Ops portal.",
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "description": "Set to true to bypass the 30-second cached session validation check",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Portal session status retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortalStatusResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Portal is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Portal request timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters": {
+      "get": {
+        "summary": "Live Meter Search",
+        "description": "Search meters with pagination via the live portal search endpoint.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search term (consumer name, meter number, etc.)",
+            "schema": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number (1-based)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of matching meters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          }
+        }
+      }
+    },
+    "/api/v1/meters/{meterId}/location": {
+      "get": {
+        "summary": "Meter Coordinates & Location",
+        "description": "Retrieves GPS coordinates and address for a specific meter.",
+        "parameters": [
+          {
+            "name": "meterId",
+            "in": "path",
+            "required": true,
+            "description": "Meter identifier",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meter location coordinates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterLocationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          }
+        }
+      }
+    },
+    "/api/v1/meters/{meterId}/consumption": {
+      "get": {
+        "summary": "Meter Energy Consumption",
+        "description": "Fetches and normalizes energy/consumption readings for a specific meter, preserving original timestamps.",
+        "parameters": [
+          {
+            "name": "meterId",
+            "in": "path",
+            "required": true,
+            "description": "Meter identifier",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meter consumption readings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterConsumptionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          }
+        }
+      }
+    },
+    "/api/v1/meters/export": {
+      "get": {
+        "summary": "Trigger Bulk Export Import",
+        "description": "Fetches bulk meter records from the portal, normalizes hierarchy and coordinates, and atomically updates the local in-memory index. Deduplicates simultaneous overlapping requests.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Start page number (default: 1)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bulk import completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportTriggerResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableError"
+          },
+          "504": {
+            "$ref": "#/components/responses/GatewayTimeoutError"
+          }
+        }
+      }
+    },
+    "/api/v1/meters/export/status": {
+      "get": {
+        "summary": "Bulk Export Status",
+        "description": "Returns current export status, total indexed records, and last successful refresh timestamp.",
+        "responses": {
+          "200": {
+            "description": "Export status report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/local": {
+      "get": {
+        "summary": "Search Local Meter Index",
+        "description": "Fast multi-field search and hierarchy filtering over locally indexed meters with pagination.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Search keyword matching name, meter number, or address",
+            "schema": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "circle",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "division",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "subdivision",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "substation",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "feeder",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "transformer",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of locally indexed meters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalMeterSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/v1/meters/local/{meterId}": {
+      "get": {
+        "summary": "Retrieve Local Meter by ID",
+        "description": "Retrieves a single locally indexed meter by ID or meter number.",
+        "parameters": [
+          {
+            "name": "meterId",
+            "in": "path",
+            "required": true,
+            "description": "Meter identifier or meter number",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Indexed meter details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleLocalMeterResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundError"
+          }
+        }
+      }
+    },
+    "/api/v1/transformers": {
+      "get": {
+        "summary": "List Transformers",
+        "description": "Retrieves paginated list of distribution transformers (DTs).",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated transformer list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransformerListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailableError"
+          }
+        }
+      }
+    },
+    "/api/v1/transformers/{transformerId}/meters": {
+      "get": {
+        "summary": "Transformer Connected Meters",
+        "description": "Retrieves all meters associated with a specific transformer by ID or name.",
+        "parameters": [
+          {
+            "name": "transformerId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transformer meters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransformerMetersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy": {
+      "get": {
+        "summary": "Network Hierarchy Summary",
+        "description": "Returns counts of unique entities across all 8 hierarchy tiers: Zone, Circle, Division, Subdivision, Substation, Feeder, Transformer, and Meter.",
+        "responses": {
+          "200": {
+            "description": "Hierarchy statistical summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchySummaryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy/tree": {
+      "get": {
+        "summary": "Network Hierarchy Tree",
+        "description": "Returns the multi-tier hierarchy tree down to the requested depth level.",
+        "parameters": [
+          {
+            "name": "depth",
+            "in": "query",
+            "required": false,
+            "description": "Tree depth termination tier",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "zone",
+                "circle",
+                "division",
+                "subdivision",
+                "substation",
+                "feeder",
+                "transformer",
+                "meter"
+              ],
+              "default": "transformer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Nested hierarchy tree",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyTreeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy/children": {
+      "get": {
+        "summary": "Navigate Hierarchy Children",
+        "description": "Navigates child nodes of a specific hierarchy level under optional parent scope constraints.",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "required": true,
+            "description": "Target tier level",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "zone",
+                "circle",
+                "division",
+                "subdivision",
+                "substation",
+                "feeder",
+                "transformer",
+                "meter"
+              ]
+            }
+          },
+          { "name": "zone", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "circle", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "division", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "subdivision", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "substation", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "feeder", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "transformer", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Child nodes list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyChildrenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy/meters": {
+      "get": {
+        "summary": "Filter Meters by Hierarchy",
+        "description": "Retrieves meters filtered by any combination of hierarchy tiers with pagination.",
+        "parameters": [
+          { "name": "zone", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "circle", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "division", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "subdivision", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "substation", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "feeder", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "transformer", "in": "query", "required": false, "schema": { "type": "string" } },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filtered meters list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalMeterSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/api/v1/hierarchy/transformers/{transformerId}/meters": {
+      "get": {
+        "summary": "Transformer Meters (Hierarchy Route)",
+        "description": "Alias route to retrieve all meters connected to a specific transformer.",
+        "parameters": [
+          {
+            "name": "transformerId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transformer meters list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransformerMetersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiErrorResponse": {
+        "type": "object",
+        "required": ["success", "error"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "VALIDATION_ERROR",
+                  "NOT_FOUND",
+                  "ROUTE_NOT_FOUND",
+                  "PORTAL_AUTH_FAILED",
+                  "PORTAL_SESSION_EXPIRED",
+                  "PORTAL_TIMEOUT",
+                  "PORTAL_UNAVAILABLE",
+                  "INVALID_CONFIGURATION",
+                  "INTERNAL_SERVER_ERROR"
+                ],
+                "example": "VALIDATION_ERROR"
+              },
+              "message": {
+                "type": "string",
+                "example": "Invalid query parameters: page: Number must be greater than 0"
+              },
+              "details": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["success", "service", "status"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "service": { "type": "string", "example": "urja-meter-api" },
+          "status": { "type": "string", "example": "healthy" }
+        }
+      },
+      "PortalStatusResponse": {
+        "type": "object",
+        "required": ["success", "portal", "authenticated"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "portal": { "type": "string", "example": "Urja Meter Ops" },
+          "authenticated": { "type": "boolean", "example": true }
+        }
+      },
+      "MeterHierarchy": {
+        "type": "object",
+        "properties": {
+          "zone": { "type": "string", "nullable": true },
+          "circle": { "type": "string", "nullable": true },
+          "division": { "type": "string", "nullable": true },
+          "subdivision": { "type": "string", "nullable": true },
+          "substation": { "type": "string", "nullable": true },
+          "feeder": { "type": "string", "nullable": true },
+          "transformer": { "type": "string", "nullable": true },
+          "transformerId": { "type": "string", "nullable": true },
+          "dtName": { "type": "string", "nullable": true },
+          "dtId": { "type": "string", "nullable": true }
+        }
+      },
+      "MeterCoordinates": {
+        "type": "object",
+        "properties": {
+          "latitude": { "type": "number", "nullable": true, "example": 28.6139 },
+          "longitude": { "type": "number", "nullable": true, "example": 77.209 },
+          "address": { "type": "string", "nullable": true, "example": "123 Main Street" }
+        }
+      },
+      "NormalizedMeter": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "example": "M001" },
+          "meterNo": { "type": "string", "nullable": true, "example": "123456" },
+          "consumerName": { "type": "string", "nullable": true, "example": "Rajesh Kumar" },
+          "consumerNo": { "type": "string", "nullable": true, "example": "C001" },
+          "dtName": { "type": "string", "nullable": true, "example": "DT-Alpha" },
+          "dtId": { "type": "string", "nullable": true, "example": "DT001" },
+          "subdivision": { "type": "string", "nullable": true, "example": "South" },
+          "status": { "type": "string", "nullable": true, "example": "active" },
+          "manufacturer": { "type": "string", "nullable": true, "example": "HPL" },
+          "phase": { "type": "string", "nullable": true, "example": "single" },
+          "raw": { "type": "object" }
+        }
+      },
+      "NormalizedIndexedMeter": {
+        "type": "object",
+        "required": ["id", "hierarchy", "location", "importedAt"],
+        "properties": {
+          "id": { "type": "string", "example": "EXP001" },
+          "meterNo": { "type": "string", "nullable": true, "example": "MTR-1001" },
+          "consumerName": { "type": "string", "nullable": true, "example": "Amit Patel" },
+          "consumerNo": { "type": "string", "nullable": true, "example": "CONS-9001" },
+          "status": { "type": "string", "nullable": true, "example": "active" },
+          "hierarchy": { "$ref": "#/components/schemas/MeterHierarchy" },
+          "location": { "$ref": "#/components/schemas/MeterCoordinates" },
+          "importedAt": { "type": "string", "format": "date-time" },
+          "raw": { "type": "object" }
+        }
+      },
+      "MeterSearchResponse": {
+        "type": "object",
+        "required": ["success", "data", "pagination"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/NormalizedMeter" }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": { "type": "integer", "example": 1 },
+              "total": { "type": "integer", "nullable": true, "example": 42 }
+            }
+          }
+        }
+      },
+      "MeterLocationResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "meterId": { "type": "string", "example": "M001" },
+              "latitude": { "type": "number", "nullable": true, "example": 28.6139 },
+              "longitude": { "type": "number", "nullable": true, "example": 77.209 },
+              "address": { "type": "string", "nullable": true, "example": "New Delhi" },
+              "raw": { "type": "object" }
+            }
+          }
+        }
+      },
+      "MeterConsumptionResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "meterId": { "type": "string", "example": "M001" },
+              "count": { "type": "integer", "example": 2 },
+              "readings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "timestamp": { "type": "string", "nullable": true, "example": "2024-01-15T10:00:00Z" },
+                    "value": { "type": "number", "nullable": true, "example": 150.5 },
+                    "unit": { "type": "string", "example": "kWh" },
+                    "raw": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TransformerListResponse": {
+        "type": "object",
+        "required": ["success", "data", "pagination"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "example": "DT001" },
+                "name": { "type": "string", "nullable": true, "example": "DT-Alpha" },
+                "capacity": { "type": "string", "nullable": true, "example": "100kVA" },
+                "subdivision": { "type": "string", "nullable": true, "example": "South" },
+                "feeder": { "type": "string", "nullable": true, "example": "Feeder-1" },
+                "status": { "type": "string", "nullable": true, "example": "active" },
+                "meterCount": { "type": "integer", "nullable": true, "example": 25 },
+                "raw": { "type": "object" }
+              }
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": { "type": "integer", "example": 1 },
+              "total": { "type": "integer", "nullable": true, "example": 120 }
+            }
+          }
+        }
+      },
+      "ExportTriggerResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "importedCount": { "type": "integer", "example": 42 },
+              "totalIndexed": { "type": "integer", "example": 42 },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "status": { "type": "string", "example": "completed" }
+            }
+          }
+        }
+      },
+      "ExportStatusResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string", "example": "completed" },
+              "lastSuccessfulRefresh": { "type": "string", "format": "date-time", "nullable": true },
+              "lastAttempt": { "type": "string", "format": "date-time", "nullable": true },
+              "totalIndexed": { "type": "integer", "example": 42 },
+              "importedCount": { "type": "integer", "example": 42 },
+              "lastError": { "type": "string", "nullable": true }
+            }
+          }
+        }
+      },
+      "LocalMeterSearchResponse": {
+        "type": "object",
+        "required": ["success", "data", "pagination"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/NormalizedIndexedMeter" }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": { "type": "integer", "example": 1 },
+              "limit": { "type": "integer", "example": 20 },
+              "total": { "type": "integer", "example": 42 },
+              "totalPages": { "type": "integer", "example": 3 }
+            }
+          }
+        }
+      },
+      "SingleLocalMeterResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": { "$ref": "#/components/schemas/NormalizedIndexedMeter" }
+        }
+      },
+      "TransformerMetersResponse": {
+        "type": "object",
+        "required": ["success", "transformer", "data", "pagination"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "transformer": { "type": "string", "example": "DT-Alpha" },
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/NormalizedIndexedMeter" }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": { "type": "integer", "example": 1 },
+              "limit": { "type": "integer", "example": 20 },
+              "total": { "type": "integer", "example": 25 },
+              "totalPages": { "type": "integer", "example": 2 }
+            }
+          }
+        }
+      },
+      "HierarchySummaryResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "object",
+            "properties": {
+              "levels": {
+                "type": "object",
+                "properties": {
+                  "zone": { "type": "integer", "example": 2 },
+                  "circle": { "type": "integer", "example": 4 },
+                  "division": { "type": "integer", "example": 8 },
+                  "subdivision": { "type": "integer", "example": 16 },
+                  "substation": { "type": "integer", "example": 24 },
+                  "feeder": { "type": "integer", "example": 48 },
+                  "transformer": { "type": "integer", "example": 120 },
+                  "meter": { "type": "integer", "example": 450 }
+                }
+              },
+              "totalMeters": { "type": "integer", "example": 450 }
+            }
+          }
+        }
+      },
+      "HierarchyTreeResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "example": "North Zone" },
+                "level": { "type": "string", "example": "zone" },
+                "meterCount": { "type": "integer", "example": 250 },
+                "children": { "type": "array", "items": { "type": "object" } }
+              }
+            }
+          }
+        }
+      },
+      "HierarchyChildrenResponse": {
+        "type": "object",
+        "required": ["success", "data"],
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "example": "Delhi Circle" },
+                "level": { "type": "string", "example": "circle" },
+                "meterCount": { "type": "integer", "example": 250 },
+                "parent": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "ValidationError": {
+        "description": "Validation error (invalid query/path parameters)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiErrorResponse" }
+          }
+        }
+      },
+      "UnauthorizedError": {
+        "description": "Urja Meter Ops portal session is invalid or expired",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiErrorResponse" }
+          }
+        }
+      },
+      "NotFoundError": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiErrorResponse" }
+          }
+        }
+      },
+      "ServiceUnavailableError": {
+        "description": "Urja Meter Ops portal is unavailable or unreachable",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiErrorResponse" }
+          }
+        }
+      },
+      "GatewayTimeoutError": {
+        "description": "Request or portal response timed out",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiErrorResponse" }
+          }
+        }
+      }
+    }
+  }
+}
+
